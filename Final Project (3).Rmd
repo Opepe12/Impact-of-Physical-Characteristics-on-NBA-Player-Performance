@@ -1,0 +1,483 @@
+---
+title: "Final Project"
+author: "Russell Low"
+date: "2024-02-22"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+##Part 1 - Introduction
+#The topic of study is the characteristics of NBA players from 1947 to 2022. We are studying the effect of height on free throw percentage and also finding the changes over time of basketball players and their demographics. This includes a variety of variables including height, weight, BMI, free throw percentage, and etc. We can learn about the changes over time of NBA players who qualify and see whether certain characteristics affect player level and quality.
+
+
+##Part 2 - Background 
+#Our group used three datasets 1)contained the physical attributes of all of the people to ever play in the NBA dataset 2) and 3) had the game stats for all the active players in the league for the 22-23 and 23-24 season. The datasets provided our group with the needed information to observe the phenomenon where the tallest players are the worst at free throws compared to their shorter team members. We also observed how the average height, weight, and BMI of players have changed since the start of the league in 1948 to today. All of the datasets were Excel/CSV files. The unit of observation for the all_player_bios was the individual player's name. The stats data frame unit of observation was also the individual player in a given season, which was either 22-23 or 23-24. The most important variables for our project were the player's height, weight, BMI, position, and free throw percentage(FT%). These variables were the most useful for us to try and observe a correlation between physical attributes such as height and free throw accuracy. When reading the data visualizations it is important to remember that a player's position is usually related to the player's height. For example, the tallest and biggest players generally play center, and the smaller and faster players are more likely to play a guard position. It is also important to note that some data points for the free throws lie on the asymptote 1 or 0.0. This does mean that the player that the point represents has 100% success at the line or zero success. It more likely indicates that that player did not have the opportunity to play more than once or twice that season. Finally, for the age visualization, the graph appears counterintuitive in that as players get older they would get worse. This is a collider bias issue because only the players who remain high performers in their later years stay in the league. Thus the graph might be misleading because only the best players can play into their late thirties and early forties it doesn't show that the majority of players retire around 33 years old.  
+
+
+##Part 3 - Data Wrangling
+```{r}
+#Load tidyverse, stringr, ggridges, and csv data files.
+
+library(tidyverse)
+library(stringr)
+library(ggridges)
+
+a_initial_Season_22_23 <- read_csv("NBA Stats 202223 All Stats  NBA Player Props Tool.csv")
+a_initial_Season_23_24 <- read_csv("NBA Stats 202324 All Stats  NBA Player Props Tool.csv")
+a_initial_playerset <- read_csv("common_player_info.csv")
+```
+
+
+```{r}
+all_player_bios <- a_initial_playerset %>%
+  
+#Clean data by removing players who have never been drafted or have no body measurement data.
+  filter(draft_year != "Undrafted") %>%
+  filter_at(vars(height,weight), all_vars(!is.na(.))) %>%
+  
+#Select variables for first name, last name, body measurements, season experience, position, year of draft, and year of retirement.
+  subset(select= c(first_name,
+                   last_name,
+                   weight,
+                   height,
+                   season_exp,
+                   position, 
+                   draft_year,
+                   to_year)) %>%
+  
+#Concatenate first and last name of players. Create a new variable, "NAME", and alphabetically order players by "NAME".
+  unite("NAME", 
+        c(first_name,last_name), 
+        sep=" ", 
+        remove=TRUE) %>%
+  arrange(NAME) %>%
+  
+#Convert "height" from "feet, inches" into strictly inches.
+#Separate non-numeric variable, "height", into two numeric variables, "Feet" and "Inches".
+  separate(height, into = c("Feet", "Inches"), 
+           sep ="-") %>%
+  mutate(Feet = as.numeric(Feet)) %>%
+  mutate(Inches = as.numeric(Inches)) %>%
+  
+#Recalculate "height" in strictly inches and remove the "Feet" and "Inches" variables.
+  mutate(height = 12 * Feet + Inches) %>%
+  subset(select = -c(Feet,Inches)) %>%
+  relocate(height, .after = NAME) %>%
+  
+#Create and calculate BMI
+  mutate(BMI = 
+           round((weight*0.453592)/(height*0.0254)^2, 2)) %>%
+  relocate(BMI, .after = NAME) %>%
+  
+#Edit "position" for later joining and simplify "position" to strictly Forward, Center, or Guard.
+  mutate(position = gsub("Forward","F",position)) %>% 
+  mutate(position = gsub("Center","C",position)) %>% 
+  mutate(position = gsub("Guard","G",position)) %>% 
+  mutate(position = 
+           case_when(
+             position == "F-C" | position == "F-G" | position == "F" ~ "F",
+             position == "G-C" | position == "G-F" | position == "G" ~ "G",
+             position == "C-F" | position == "C-G" | position == "C" ~ "C")) %>% 
+  
+#Change draft_year and to_year into a numeric for later analysis.
+  mutate(draft_year = as.numeric(draft_year)) %>% 
+  mutate(to_year = as.numeric(to_year)) %>% 
+  
+#Remove punctuation that could hinder later joining.
+  mutate(NAME = gsub("\\.","",NAME)) %>% 
+  mutate(NAME = gsub("\\'","",NAME))
+
+#Create a new dataset that reports general info of players in the 2022-2023 and 2023-2024 season.
+player_bios_22_24 <- all_player_bios %>%
+  filter(to_year >= 2022)
+
+#_______________________________________________________________________________
+print(all_player_bios)
+print(player_bios_22_24)
+```
+
+
+```{r}
+#Create "SEASON" that reports the season that the data originates from.
+a_initial_Season_22_23 <- a_initial_Season_22_23 %>%
+  mutate(SEASON = "2022-23") %>%
+  relocate(SEASON) 
+
+a_initial_Season_23_24 <- a_initial_Season_23_24 %>%
+  mutate(SEASON = "2023-24") %>%
+  relocate(SEASON) 
+
+#Join 2022-2023 and 2023-2024 season stats. Remove unnecessary variable, "RANK".
+player_gamestats_22_24 <- full_join(a_initial_Season_22_23, a_initial_Season_23_24) %>% 
+  arrange(NAME) %>%
+  
+#Rename certain stats with "%" for later analysis 
+  rename(FTp = "FT%") %>%
+  rename(P3p = "3P%") %>%
+  subset(select = c(SEASON,NAME,TEAM,POS,AGE,FTp,P3p)) %>% 
+
+#Remove punctuation that could hinder later joining.
+  mutate(NAME = gsub("\\.","",NAME)) %>% 
+  mutate(NAME = gsub("\\'","",NAME))
+
+#_______________________________________________________________________________
+print(player_gamestats_22_24)
+```
+
+
+```{r}
+#Join data from 2022-2024 season stats and player general info. 
+player_info_22_24 <- player_gamestats_22_24  %>% 
+  left_join(player_bios_22_24, by=c("NAME", "POS"="position")) %>%
+  
+#Remove players with no height or weight data (approx. 300 players).
+  filter_at(vars(height,weight), all_vars(!is.na(.)))
+
+#Group players by position and draft year. Create variables for the mean height, weight, and BMI of player groups.
+mean_all_player_bios <- all_player_bios %>% 
+  group_by(position, draft_year) %>% 
+  summarize(mean_height = mean(height), 
+            mean_weight = mean(weight), 
+            mean_BMI = mean(BMI))
+
+#_______________________________________________________________________________
+print(player_info_22_24)
+
+print(mean_all_player_bios)
+```
+
+##Part 4 - Exploratory Analysis
+```{r}
+#All of these histograms were used to show the viability of our data and accuracy of each variable. 
+
+#Histogram for Height vs. Draft Year
+histogram_height_year <- mean_all_player_bios
+
+#Mutating histogram to create groups by 10 year intervals
+histogram_height_year <- mutate (histogram_height_year, 
+      year_group = cut(draft_year, 
+                       breaks = seq(1940, 2022, by = 10)))
+
+#Creating Average Heights for each 10 year interval
+  histogram_height <- histogram_height_year %>%
+    group_by (year_group) %>%
+    summarise (avg_height = mean(mean_height))
+
+#_______________________________________________________________________________  
+#Creating Histogram
+ggplot(histogram_height, 
+      aes(y = avg_height, 
+          x = year_group)) + 
+  
+  geom_col() + 
+  
+  labs (x = "Draft Year", 
+        y = "Height", 
+        title = "Draft Year vs. Height from 1940 - 2024") +
+  
+  scale_x_discrete (labels = 
+                      c("1940-1949", "1950-1959", "1960-1969", "1970-1979", "1980-1989", "1990-1999", "2000-2009", "2010-2019", "2020-2024"))
+
+
+#_______________________________________________________________________________
+#Histogram for Weight vs. Position
+
+#Creating Average Weights for each position
+histogram_weight <- mean_all_player_bios %>%
+  group_by (position) %>%
+  summarise (avg_weight = mean(mean_weight))
+
+#Creating Histogram
+ggplot(histogram_weight, 
+       aes(x = position, 
+           y = avg_weight)) + 
+  
+  geom_col() + 
+  
+  labs (x = "Position", 
+        y = "Average Weight", 
+        title = "Position vs. Weight for Players from 1940 - 2024") + 
+  
+  scale_x_discrete (labels = 
+                      c ("Center", "Forward", "Guard"))
+
+#_______________________________________________________________________________
+#Histogram for BMI vs. Draft Year
+
+#Creating Average Weights for each 10 year interval
+histogram_bmi <- histogram_height_year %>%
+group_by (year_group) %>%
+  summarise (avg_bmi = mean(mean_BMI))
+
+#Creating graph
+ggplot (histogram_bmi, 
+        aes(x = year_group, y = avg_bmi)) + 
+ 
+  geom_col () +
+  
+  labs (x = "Draft Year", 
+        y = "Average BMI", 
+        title = "Draft Year vs. Average BMI for Players from 1940 - 2024") +
+  
+  scale_x_discrete (labels = c("1940-1949", "1950-1959", "1960-1969", "1970-1979", "1980-1989", "1990-1999", "2000-2009", "2010-2019", "2020-2024"))
+
+#_______________________________________________________________________________
+#Histogram for Age vs. Free Throw Percentage
+
+#Creating histogram
+ggplot(player_info_22_24, 
+       aes(x = AGE, y = FTp)) + 
+  
+  geom_col() + 
+  
+  labs(x = "Age", 
+       y = "Free Throw Percentage", 
+       title = "The Age of Players vs. Free Throw Percentage for 2022-2023", 
+       color = "Position")
+
+#_______________________________________________________________________________
+#Histogram for Age vs. Three Point Percentage
+
+#Creating histogram
+ggplot(player_info_22_24, 
+       aes(x = AGE, y = P3p)) + 
+  
+  geom_col() + 
+  
+  labs(x = "Age", 
+       y = "Three Point Percentage", 
+       title = "The Age of Players vs. Three Point Percentage for 2022-2023", 
+       color = "Position")
+```
+
+#How has height and weight changed throughout the year - "common_player_info"?
+```{r}
+ggplot(mean_all_player_bios, 
+       aes(y=mean_height,
+           x=draft_year, 
+           color = position, 
+           group = position)) + 
+  
+  geom_line() +
+  
+  geom_point() + 
+  
+  scale_x_continuous(breaks = 
+                       seq(1947, 2022, 
+                           by = 10)) + 
+  
+  scale_color_discrete(labels = 
+                         c("C" = "Center", "F" = "Forward", "G" = "Guard")) + 
+  
+  labs(x = "Year Drafted", 
+       y = "Average Player Height (inches)", 
+       title = "Average Player Height vs. Year Drafted between 1947 to 2022", 
+       color = "Position")
+
+#_______________________________________________________________________________
+ggplot(mean_all_player_bios, 
+       aes(y=mean_weight,
+           x=draft_year, 
+           color = position, 
+           group = position)) + 
+  
+  geom_line() +
+  
+  geom_point() + 
+  
+  scale_color_discrete(labels = 
+                         c("C" = "Center", "F" = "Forward", "G" = "Guard")) + 
+  
+  labs(x = "Year Drafted", 
+       y = "Average Player Weight (lbs)", 
+       title = "Average Player Weight vs. Year Drafted between 1947 to 2022", 
+       color = "Position")
+
+#_______________________________________________________________________________
+ggplot(mean_all_player_bios, 
+       aes(y=mean_BMI,
+           x=draft_year, 
+           color = position, 
+           group = position)) + 
+  
+  geom_line() +
+  
+  geom_point() + 
+  
+  scale_color_discrete(labels = 
+                         c("C" = "Center", "F" = "Forward", "G" = "Guard")) + 
+  
+  labs(x = "Year Drafted", 
+       y = "Average Player BMI", 
+       title = "Average Player BMI vs. Year Drafted between 1947 to 2022", 
+       color = "Position")
+```
+
+#How does height and weight differ btwn teams?
+```{r}
+#_______________________________________________________________________________
+#Age vs Free Throw Percentage 
+
+#Filtering to include only players who played in 2023. 
+df3 <- all_player_bios %>%
+  filter(to_year >= 2023) 
+  #join_by(all_player_bios, a_initial_Season_23_24, "NAME")
+  #merge(all_player_bios, a_initial_Season_22_23[, c("NAME", "FT%")], by = "NAME", all.x = TRUE)
+
+#Merges bio info with the statistics to create one data frame for visual. 
+info_22_23 <- merge (df3, 
+                     a_initial_Season_22_23[,c("NAME", "FT%", "3P%","AGE")], 
+                     by = "NAME", 
+                     all.x = TRUE) %>%
+ 
+  rename(FTP = "FT%") %>%
+  rename(tPP = "3P%")
+
+#_______________________________________________________________________________
+#Height vs. Free Throw Percentage
+
+#Creating point graph only allowing values between 0 and 1 for percentages
+ggplot(info_22_23, aes(x = height, 
+                       y = FTP, 
+                       color = position)) + 
+  geom_point() + 
+  scale_y_continuous(limits = c(0, 1)) + 
+  scale_color_discrete (labels = 
+                          c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  labs(x = "Height", 
+       y = "Free Throw Percentage", 
+       title = "The Height of Players vs. Free Throw Percentage for 2022-2023", 
+       color = "Position")
+
+#_______________________________________________________________________________
+#Faceted Height vs. Free Throw Percentage
+
+#Creating graph with a facet for each position
+ggplot(info_22_23, aes(x = height, 
+                       y = FTP, 
+                       color = position)) + 
+  geom_point() + 
+  scale_y_continuous(limits = c(0, 1)) + 
+  facet_wrap(~ position) + 
+  geom_smooth() + 
+  scale_color_discrete (labels = c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  labs(x = "Height", 
+       y = "Free Throw Percentage", 
+       title = "The Height of Players vs. Free Throw Percentage for 2022-2023", 
+       color = "Position")
+
+#_______________________________________________________________________________
+#Weight vs. Free Throw Percentage
+
+#Creating graph showing weight and free throw percentage
+ggplot(info_22_23, aes(x = weight,
+                       y = FTP, 
+                       color = position)) + 
+  geom_point() + 
+  scale_color_discrete (labels = 
+                          c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  labs(x = "Weight", 
+       y = "Free Throw Percentage", 
+       title = "The Weight of Players vs. Free Throw Percentage for 2022-2023", 
+       color = "Position")
+
+#_______________________________________________________________________________
+#Weight vs. Free Throw Percentage Faceted
+
+#Creating graph with a facet for each percentage and smooth line through points to show trend
+ggplot(info_22_23, aes(x = weight, 
+                       y = FTP, 
+                       color = position)) +
+  geom_point() +
+  facet_wrap(~ position) + 
+  geom_smooth() + 
+  scale_color_discrete (labels = 
+                          c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  labs(x = "Weight", 
+       y = "Free Throw Percentage", 
+       title = "The Weight of Players vs. Free Throw Percentage for 2022-2023", 
+       color = "Position")
+
+#_______________________________________________________________________________
+#Age vs. Free Throw Percentage
+
+#Creating graph with smooth line showing trend for each position
+ggplot(info_22_23, aes(x = AGE, 
+                       y = FTP, 
+                       color = position)) + 
+  geom_point() + 
+  geom_smooth() + 
+  scale_color_discrete (labels = 
+                          c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  labs(x = "Age", 
+       y = "Free Throw Percentage", 
+       title = "The Age of Players vs. Free Throw Percentage for 2022-2023", 
+       color = "Position")
+
+#_______________________________________________________________________________
+#Height vs. Three Point Percentage
+
+#Creating graph showing height vs. three point percentage
+ggplot(info_22_23, aes(x = height, y = tPP, color = position)) + 
+  geom_point() + 
+  scale_color_discrete (labels = c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  labs(x = "Height", 
+       y = "Three Point Percentage", 
+       title = "The Height of Players vs. Three Point Percentage for 2022-2023", 
+       color = "Position")
+
+```
+
+## What are the variations between different body measurements and positions?
+```{r}
+#_______________________________________________________________________________
+##HEIGHT
+ggplot(mean_all_player_bios, 
+       aes(x=mean_height,
+           y=position, 
+           fill = position)) +
+  
+  geom_density_ridges(scale = 3.5, 
+                      rel_min_height = 0.01) +
+  scale_fill_discrete(labels =
+                        c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  
+  labs(x = "Mean Height (inches)",
+       y = "Position",
+       title = "Average Player Height vs. Positions", 
+       color = "Position",
+       fill = "Position") 
+
+#_______________________________________________________________________________
+## WEIGHT
+ ggplot(mean_all_player_bios,
+        aes(x = mean_weight, 
+            y = position,
+            fill = position)) + 
+  
+  geom_density_ridges(scale = 3.5)+
+  scale_fill_discrete(labels=c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  
+  labs(x = "Mean Weight (lbs)", 
+       y = "Position",
+       title = "Average Player Weight vs. Positions", 
+       color = "Position",
+       fill = "Position" )
+ 
+#_______________________________________________________________________________
+## BMI
+ggplot(mean_all_player_bios, 
+       aes(x = mean_BMI, 
+           y = position,
+          fill = position))+ 
+  
+  geom_density_ridges(scale = 3.5)+
+  scale_fill_discrete(labels =
+                        c("C" = "Center", "F" = "Forward", "G" = "Guard")) +
+  
+  labs(x = "Mean BMI", y = "Position",
+       title = "Average Player BMI vs. Positions", 
+       color = "Position",
+       fill = "Position")
+```
