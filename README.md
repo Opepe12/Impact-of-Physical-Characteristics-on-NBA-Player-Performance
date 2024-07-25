@@ -1,2 +1,2 @@
-# Impact-of-Physical-Characteristics-on-NBA-Player-Performance
+# Impact-of-Physical-Characteristics-on-NBA-Player-Performance (Group Project)
 Between 1942 and 2023, the national basketball association has developed as a sport, changing rules. Over this time, a variety of factors have impacted player success. This project evaluates how factors like height, weight, BMI, and player position impacts success in the NBA between 1942 and 2023, focusing specifically on the 2022-2023 season. 
